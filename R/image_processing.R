@@ -1869,8 +1869,11 @@ connected_pixels_modi1 <- function(clusters,
             } else {
                 new_pool <- unique(graph$e2[graph$e1 %in% inter & graph$cor >= threshold])
                 overlap <- new_pool %in% pool & !new_pool %in% total_pool
+                print(new_pool)
+                print(overlap)
+                message(paste("new_pool:", length(new_pool)))
+                message(paste("overlap :", length(overlap)))
                 if (sum(overlap) != length(new_pool)) {
-                  message(paste("Ini:", length(initial_pixels)))
                     pool <- unique(c(pool, new_pool[!overlap]))
                     inter <- unique(new_pool[!overlap])
                     converge <- FALSE
