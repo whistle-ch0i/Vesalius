@@ -1805,3 +1805,88 @@ connected_pixels <- function(clusters,
     }
     return(clusters)
 }
+
+
+connected_pixels_modi1 <- function(clusters,
+  embeddings,
+  k = 6,
+  threshold = 0.90,
+  verbose = TRUE) {
+    message_switch("connect_pixel", verbose)
+    #-------------------------------------------------------------------------#
+    # First we need to get super pixel centers 
+    #-------------------------------------------------------------------------#
+    center_pixels <- sort(unique(clusters$Segment))
+    centers <- future_lapply(center_pixels, function(center, segments){
+        x <- median(segments$x[segments$Segment == center])
+        y <- median(segments$y[segments$Segment == center])
+        df <- data.frame("x" = x, "y" = y)
+        rownames(df) <- center
+        return(df)
+    }, segments = clusters) %>% do.call("rbind", .)
+    #-------------------------------------------------------------------------#
+    # Next we get the nearest neighbors
+    #-------------------------------------------------------------------------#
+    knn <- RANN::nn2(centers, k = k + 1)$nn.idx
+    rownames(knn) <- rownames(centers)
+    #-------------------------------------------------------------------------#
+    # Next we intialise a graph and then compute correlation
+    #-------------------------------------------------------------------------#
+    graph <- populate_graph(knn)
+    graph$cor <- 0
+    for (i in seq_len(nrow(graph))) {
+        c1 <- embeddings[clusters$barcodes[clusters$Segment == graph$e1[i]], ]
+        if (!is.null(nrow(c1))) {
+            c1 <- apply(c1, 2, mean)
+        }
+        c2 <- embeddings[clusters$barcodes[clusters$Segment == graph$e2[i]], ]
+        if (!is.null(nrow(c2))) {
+            c2 <- apply(c2, 2, mean)
+        }
+        graph$cor[i] <- cor(c1, c2, method = "pearson")
+    }
+    #-------------------------------------------------------------------------#
+    # Then we interatively pool pixels together under the a transitive 
+    # correlation assumption i.e if A cor B and B cor with C then A cor C
+    #-------------------------------------------------------------------------#
+    initial_pixels <- unique(graph$e1)
+    total_pool <- c()
+    segments <-  list()
+    count <- 1
+    while (length(initial_pixels) > 0) {
+        message(paste("Initial pixels left:", length(initial_pixels)))
+        start_pixel <- sample(initial_pixels, size = 1)
+        pool <- graph$e2[graph$e1 == start_pixel & graph$cor >= threshold]
+        inter <- pool
+        total_pool <- c(total_pool, pool)
+        converge <- FALSE
+        while (!converge) {
+            if (length(inter) == 1) {
+                segments[[count]] <- pool
+                initial_pixels <- initial_pixels[!initial_pixels %in% pool]
+                count <- count + 1
+                converge <- TRUE
+            } else {
+                new_pool <- unique(graph$e2[graph$e1 %in% inter & graph$cor >= threshold])
+                overlap <- new_pool %in% pool & !new_pool %in% total_pool
+                if (sum(overlap) != length(new_pool)) {
+                    pool <- unique(c(pool, new_pool[!overlap]))
+                    inter <- unique(new_pool[!overlap])
+                    converge <- FALSE
+                } else {
+                    segments[[count]] <- pool
+                    total_pool <- c(total_pool, pool)
+                    count <- count + 1
+                    initial_pixels <- initial_pixels[!initial_pixels %in% pool]
+                    converge <- TRUE
+                }
+            }
+        }
+    }
+    
+    for (seg in seq_along(segments)){
+        loc <- clusters$Segment %in% segments[[seg]]
+        clusters$Segment[loc] <- seg
+    }
+    return(clusters)
+}
