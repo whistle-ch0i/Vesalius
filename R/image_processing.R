@@ -1849,44 +1849,59 @@ connected_pixels_modi1 <- function(clusters,
     # Then we interatively pool pixels together under the a transitive 
     # correlation assumption i.e if A cor B and B cor with C then A cor C
     #-------------------------------------------------------------------------#
-    initial_pixels <- unique(graph$e1)
-    total_pool <- c()
-    segments <-  list()
-    count <- 1
-    while (length(initial_pixels) > 0) {
-        message(paste("Initial pixels left:", length(initial_pixels)))
-        start_pixel <- sample(initial_pixels, size = 1)
-        pool <- graph$e2[graph$e1 == start_pixel & graph$cor >= threshold]
-        inter <- pool
-        total_pool <- c(total_pool, pool)
-        converge <- FALSE
-        while (!converge) {
-            if (length(inter) == 1) {
-                segments[[count]] <- pool
-                initial_pixels <- initial_pixels[!initial_pixels %in% pool]
-                count <- count + 1
+    # Initialize the variables
+initial_pixels <- unique(graph$e1)
+total_pool <- c()
+segments <- list()
+count <- 1
+
+# Iterate while there are initial pixels left
+while (length(initial_pixels) > 0) {
+    message(paste("Initial pixels left:", length(initial_pixels)))
+    
+    # Sample a starting pixel
+    start_pixel <- sample(initial_pixels, size = 1)
+    
+    # Initialize the pool with the correlated pixels
+    pool <- graph$e2[graph$e1 == start_pixel & graph$cor >= threshold]
+    inter <- pool
+    total_pool <- c(total_pool, pool)
+    converge <- FALSE
+    
+    # Iterate to pool pixels under transitive correlation assumption
+    while (!converge) {
+        if (length(inter) == 0) {
+            # If no intermediate pixels left, break the loop
+            converge <- TRUE
+        } else {
+            # Find new pool of correlated pixels
+            new_pool <- unique(graph$e2[graph$e1 %in% inter & graph$cor >= threshold])
+            new_pool <- setdiff(new_pool, total_pool)  # Remove already pooled pixels
+            
+            if (length(new_pool) == 0) {
+                # If no new pool found, break the loop
                 converge <- TRUE
             } else {
-                new_pool <- unique(graph$e2[graph$e1 %in% inter & graph$cor >= threshold])
-                overlap <- new_pool %in% pool & !new_pool %in% total_pool
-                print(new_pool)
-                print(overlap)
-                message(paste("new_pool:", length(new_pool)))
-                message(paste("overlap :", length(overlap)))
-                if (sum(overlap) != length(new_pool)) {
-                    pool <- unique(c(pool, new_pool[!overlap]))
-                    inter <- unique(new_pool[!overlap])
-                    converge <- FALSE
-                } else {
-                    segments[[count]] <- pool
-                    total_pool <- c(total_pool, pool)
-                    count <- count + 1
-                    initial_pixels <- initial_pixels[!initial_pixels %in% pool]
+                # Check if new_pool has overlap with the current pool
+                overlap <- new_pool %in% pool
+                if (sum(overlap) == length(new_pool)) {
+                    # If all new_pool pixels are already in the pool, break the loop
                     converge <- TRUE
+                } else {
+                    # Update pool and intermediate pixels
+                    pool <- unique(c(pool, new_pool[!overlap]))
+                    inter <- new_pool[!overlap]
                 }
             }
         }
     }
+    
+    # Store the pooled segment and update initial pixels
+    segments[[count]] <- pool
+    initial_pixels <- setdiff(initial_pixels, pool)
+    total_pool <- c(total_pool, pool)
+    count <- count + 1
+}
     
     for (seg in seq_along(segments)){
         loc <- clusters$Segment %in% segments[[seg]]
