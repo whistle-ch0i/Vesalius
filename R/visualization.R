@@ -52,6 +52,107 @@
 #' @importFrom stats na.exclude
 #' @importFrom grDevices rgb gray
 
+
+image_plot2 <- function(vesalius_assay,
+  dimensions = seq(1, 3),
+  embedding = "last",
+  cex = 10) {
+
+    start_time <- Sys.time()
+  
+    #--------------------------------------------------------------------------#
+    # Checking dims - only gray scale or 3 coloured images for now
+    # What approach could we take here to use different number of dims?
+    #--------------------------------------------------------------------------#
+    if (length(dimensions) > 3) {
+       stop("To many dims selected")
+    } else if (length(dimensions) != 3 && length(dimensions) != 1) {
+       stop("Non RGB /gray scale images not supported")
+    }
+  
+    after_dim_check_time <- Sys.time()
+    print(paste("Dim check time:", after_dim_check_time - start_time))
+  
+    #--------------------------------------------------------------------------#
+    # First get image data from vesalius object
+    #--------------------------------------------------------------------------#
+    coordinates <- check_tiles(vesalius_assay)
+  
+    after_check_tiles_time <- Sys.time()
+    print(paste("Check tiles time:", after_check_tiles_time - after_dim_check_time))
+  
+    #--------------------------------------------------------------------------#
+    # get last embedding
+    #--------------------------------------------------------------------------#
+    tile_colour <- check_embedding_selection(vesalius_assay,
+      embedding,
+      dimensions)[, dimensions]
+  
+    after_check_embedding_time <- Sys.time()
+    print(paste("Check embedding time:", after_check_embedding_time - after_check_tiles_time))
+  
+    if (embedding == "last") {
+      embed_name <- get_active_embedding_tag(vesalius_assay)
+    } else {
+      embed_name <- embedding
+    }
+  
+    #--------------------------------------------------------------------------#
+    # reformat to a data frame for easy use with ggplot
+    # rebalence colors - min-max norm colors jjust in case 
+    # and reformats to clean data frame for hex color generation
+    #--------------------------------------------------------------------------#
+    tile_colour <- as.data.frame(tile_colour)
+    tile_colour$barcodes <- rownames(tile_colour)
+    coordinates <- right_join(coordinates, tile_colour, by = "barcodes") %>%
+      na.exclude()
+  
+    after_data_join_time <- Sys.time()
+    print(paste("Data join and cleaning time:", after_data_join_time - after_check_embedding_time))
+  
+    coordinates <- rebalence_colors(coordinates,
+      length(dimensions),
+      method = "minmax")
+  
+    after_rebalance_time <- Sys.time()
+    print(paste("Rebalance colors time:", after_rebalance_time - after_data_join_time))
+  
+    #--------------------------------------------------------------------------#
+    # Generate colors and plots
+    #--------------------------------------------------------------------------#
+    if (length(dimensions) == 3) {
+      cols <- rgb(coordinates$R, coordinates$G, coordinates$B)
+      title <- paste0(embed_name, " - Dims = ",
+        paste0(dimensions, collapse = "-"))
+    } else {
+      # to do
+      cols <- gray(coordinates$Gray)
+      title <- paste0(embed_name, " - Dim = ",
+        paste0(dimensions, collapse = "-"))
+    }
+  
+    after_color_generation_time <- Sys.time()
+    print(paste("Color generation time:", after_color_generation_time - after_rebalance_time))
+  
+    image <- ggplot(coordinates, aes(x, y)) +
+        geom_raster(aes(fill = cols)) +
+        scale_fill_identity() +
+        theme_classic() +
+        theme(axis.text = element_text(size = cex * 1.2),
+          axis.title = element_text(size = cex * 1.2),
+          plot.title = element_text(size = cex * 1.5)) +
+        labs(title = title, x = "X coordinates", y = "Y coordinates")
+  
+    after_plot_time <- Sys.time()
+    print(paste("Plot generation time:", after_plot_time - after_color_generation_time))
+  
+    total_time <- after_plot_time - start_time
+    print(paste("Total execution time:", total_time))
+  
+    return(image)
+}
+
+
 image_plot <- function(vesalius_assay,
   dimensions = seq(1, 3),
   embedding = "last",
