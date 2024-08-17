@@ -236,6 +236,153 @@ generate_embeddings <- function(vesalius_assay,
 #' @importFrom deldir deldir
 #' @importFrom dplyr %>% filter
 #' @export
+generate_tiles2 <- function(vesalius_assay,
+  tensor_resolution = 1,
+  filter_grid = 0.01,
+  filter_threshold = 0.995,
+  verbose = TRUE) {
+  env <- identical(.GlobalEnv, parent.frame()) && verbose
+  simple_bar(env)
+  #----------------------------------------------------------------------#
+  # Checking if tiles have been computed 
+  #----------------------------------------------------------------------#
+  status <- any(search_log(vesalius_assay,
+    "generate_tiles",
+    return_assay = FALSE))
+  
+  if (status) {
+    warning("Tiles have already been computed!
+      Returning vesalius_assay. For a new set of tiles,
+      Create a new vesalius_assay
+      then 'generate_tiles' or 'generate _embeddings'")
+    return(vesalius_assay)
+  }
+  assay <- get_assay_names(vesalius_assay)
+  coordinates <- get_tiles(vesalius_assay)
+  message_switch("in_assay",
+    verbose = verbose,
+    assay = assay,
+    comp_type = "Generating Tiles")
+  vesalius_assay@meta$orig_coord <- coordinates
+  
+  #----------------------------------------------------------------------#
+  # Filter outlier beads
+  #----------------------------------------------------------------------#
+  if (filter_grid > 0 && filter_grid < 1) {
+    message_switch("distance_beads", verbose)
+    coordinates <- filter_grid(coordinates = coordinates,
+      filter_grid = filter_grid)
+  }
+
+  #----------------------------------------------------------------------#
+  # Reduce resolution
+  #----------------------------------------------------------------------#
+  if (tensor_resolution < 1 && tensor_resolution > 0) {
+    message_switch("tensor_res", verbose)
+    coordinates <- reduce_tensor_resolution(coordinates = coordinates,
+        tensor_resolution = tensor_resolution)
+    rescale <- calculate_scale(coordinates)
+    scale_factor <- rescale / vesalius_assay@meta$scale$scale
+    vesalius_assay@meta$scale <- list("scale" = vesalius_assay@meta$scale$scale,
+      "rescale" = rescale,
+      "scale_factor" = scale_factor)
+  } 
+  
+  #----------------------------------------------------------------------#
+  # TESSELATION TIME!
+  #----------------------------------------------------------------------#
+  message_switch("tess", verbose)
+  tesselation <- deldir::deldir(x = as.numeric(coordinates$x),
+    y = as.numeric(coordinates$y))
+  
+  #----------------------------------------------------------------------#
+  # Filtering tiles
+  #----------------------------------------------------------------------#
+  message_switch("filter_tiles", verbose)
+  filtered <- filter_tiles(tesselation, coordinates, filter_threshold)
+  
+  #----------------------------------------------------------------------#
+  # aa
+  #----------------------------------------------------------------------#
+  bounds <- range(coordinates$x, coordinates$y)
+  filtered <- filtered[filtered$x >= bounds[1] & filtered$x <= bounds[2] &
+                       filtered$y >= bounds[3] & filtered$y <= bounds[4], ]
+
+  #----------------------------------------------------------------------#
+  # Resterise tiles
+  #----------------------------------------------------------------------#
+  message_switch("raster", verbose)
+  tiles <- rasterise(filtered)
+
+  #------------------------------------------------------------------------#
+  # adjusted counts if necessary
+  #------------------------------------------------------------------------#
+  message_switch("adj_counts", verbose)
+  counts <- get_counts(vesalius_assay, type = "all")
+  if (length(counts) > 0) {
+    for (i in seq_along(counts)) {
+      counts[[i]] <- adjust_counts(tiles,
+        counts[[i]],
+        throw = FALSE,
+        verbose = FALSE)
+    }
+    vesalius_assay <- update_vesalius_assay(vesalius_assay = vesalius_assay,
+      data = counts,
+      slot = "counts",
+      append = FALSE)
+  }
+
+  #----------------------------------------------------------------------#
+  # Update territories if necessary
+  #----------------------------------------------------------------------#
+  if (!all(dim(slot(vesalius_assay, "territories")) == c(0, 0))){
+    territory_coord <- filter(tiles, origin == 1) %>%
+        select(c("barcodes","x","y"))
+    tmp <- vesalius_assay@territories
+    territory_coord <- left_join(territory_coord, tmp, by = "barcodes")
+    territory_coord <- territory_coord[, 
+        !colnames(territory_coord) %in% c("x.y","y.y")]
+    colnames(territory_coord) <- colnames(tmp)
+    vesalius_assay <- update_vesalius_assay(vesalius_assay = vesalius_assay,
+        data = territory_coord,
+        slot = "territories",
+        append = FALSE)
+  }
+
+  #----------------------------------------------------------------------#
+  # Update embeddings if necessary
+  #----------------------------------------------------------------------#
+  if (!all(dim(slot(vesalius_assay,"active")) == c(0, 0))) {
+    tmp_bar <- unique(tiles$barcodes)
+    active <- vesalius_assay@active[rownames(vesalius_assay) %in% tmp_bar, ]
+    embeds <- lapply(vesalius_assay@embeddings, function(x,bar){
+        return(x[rownames(x) %in% bar, ])
+    }, bar = tmp_bar)
+    vesalius_assay <- update_vesalius_assay(vesalius_assay = vesalius_assay,
+        data = active,
+        slot = "active",
+        append = FALSE)
+    vesalius_assay <- update_vesalius_assay(vesalius_assay = vesalius_assay,
+        data = embeds,
+        slot = "embeddings",
+        append = FALSE)
+  }
+
+  vesalius_assay <- update_vesalius_assay(vesalius_assay = vesalius_assay,
+    data = tiles,
+    slot = "tiles",
+    append = FALSE)
+  
+  commit <- create_commit_log(arg_match = as.list(match.call()),
+      default = formals(generate_tiles))
+  vesalius_assay <- commit_log(vesalius_assay,
+      commit,
+      assay)
+  simple_bar(env)
+  return(vesalius_assay)
+}
+
+
 generate_tiles <- function(vesalius_assay,
   tensor_resolution = 1,
   filter_grid = 0.01,
